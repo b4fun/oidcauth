@@ -35,7 +35,7 @@ func (p HTTPParams) defaults() HTTPParams {
 	return rv
 }
 
-// InterceptHTTP creates a HTTP middle for authenticating OIDC JWT token
+// InterceptHTTP creates a HTTP middleware for authenticating OIDC JWT token
 // from the request.
 func InterceptHTTP(params HTTPParams) HTTPMiddleware {
 	params = params.defaults()
@@ -52,13 +52,19 @@ func InterceptHTTP(params HTTPParams) HTTPMiddleware {
 		return v
 	}
 
+	principalLoader, principalLoaderErr := CreatePrincipalLoader(params.Params)
+
 	return func(h http.Handler) http.Handler {
 		return http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
-			principal := principalFromToken(
-				r.Context(),
-				params.Params,
-				loadTokenFromRequest(r),
-			)
+			var principal ClaimsPrincipal
+
+			switch {
+			case principalLoaderErr != nil:
+				principal = unauthenticatedClaimsPrincipalWithErr(principalLoaderErr)
+			default:
+				principal = principalLoader(r.Context(), loadTokenFromRequest(r))
+			}
+
 			r = r.WithContext(ctxWithClaimsPrincipal(r.Context(), principal))
 			h.ServeHTTP(w, r)
 		})

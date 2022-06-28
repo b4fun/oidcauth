@@ -56,38 +56,46 @@ func unauthenticatedClaimsPrincipal() ClaimsPrincipal {
 	return unauthenticatedClaimsPrincipalWithErr(ErrUnauthenticated)
 }
 
-func principalFromToken(
-	ctx context.Context,
-	params Params,
-	token string,
-) ClaimsPrincipal {
+// PrincipalLoaderFunc loads a ClaimsPrincipal from given context and token.
+type PrincipalLoaderFunc func(ctx context.Context, token string) ClaimsPrincipal
+
+// CreatePrincipalLoader creates the PrincipalLoaderFunc from the given Params.
+func CreatePrincipalLoader(params Params) (PrincipalLoaderFunc, error) {
 	params = params.defaults()
 
+	var httpClient *http.Client
 	if params.CAFile != "" {
-		httpClient, err := httpClientWithCA(params.CAFile)
+		var err error
+		httpClient, err = httpClientWithCA(params.CAFile)
 		if err != nil {
 			err = fmt.Errorf("create http client from CA %s: %w", params.CAFile, err)
+			return nil, err
+		}
+	}
+
+	loader := func(ctx context.Context, token string) ClaimsPrincipal {
+		if httpClient != nil {
+			ctx = oidc.ClientContext(ctx, httpClient)
+		}
+
+		provider, err := oidc.NewProvider(ctx, params.IssuerURL)
+		if err != nil {
 			return unauthenticatedClaimsPrincipalWithErr(err)
 		}
 
-		ctx = oidc.ClientContext(ctx, httpClient)
+		verifier := provider.Verifier(&oidc.Config{
+			ClientID: params.ClientID,
+		})
+
+		verifiedToken, err := verifier.Verify(ctx, token)
+		if err != nil {
+			return unauthenticatedClaimsPrincipalWithErr(err)
+		}
+
+		return newClaimsPrincipalFromToken(params, verifiedToken)
 	}
 
-	provider, err := oidc.NewProvider(ctx, params.IssuerURL)
-	if err != nil {
-		return unauthenticatedClaimsPrincipalWithErr(err)
-	}
-
-	verifier := provider.Verifier(&oidc.Config{
-		ClientID: params.ClientID,
-	})
-
-	verifiedToken, err := verifier.Verify(ctx, token)
-	if err != nil {
-		return unauthenticatedClaimsPrincipalWithErr(err)
-	}
-
-	return newClaimsPrincipalFromToken(params, verifiedToken)
+	return loader, nil
 }
 
 func httpClientWithCA(caPath string) (*http.Client, error) {
