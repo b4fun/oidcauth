@@ -1,6 +1,10 @@
 package testoidcauth
 
-import "github.com/b4fun/oidcauth"
+import (
+	"fmt"
+
+	"github.com/b4fun/oidcauth"
+)
 
 // ClaimsPrincipal provides on-demand mock for oidcauth.ClaimsPrincipal type.
 type ClaimsPrincipal struct {
@@ -51,4 +55,33 @@ func (cp *ClaimsPrincipal) AuthenticateErr() error {
 	}
 
 	panic("not implemented")
+}
+
+// UnauthenticatedClaimsPrincipal creates an unauthenticated ClaimsPrincipal.
+func UnauthenticatedClaimsPrincipal(err error) *ClaimsPrincipal {
+	return &ClaimsPrincipal{
+		NameFunc: func() string {
+			return "unauthorized"
+		},
+
+		HasRoleFunc: func(role string) bool {
+			return false
+		},
+
+		ClaimsFunc: func() oidcauth.MapClaims {
+			return oidcauth.MapClaims{}
+		},
+
+		BindClaimsFunc: func(v interface{}) error {
+			return fmt.Errorf("no claims")
+		},
+
+		AuthenticateErrFunc: func() error {
+			if err != nil {
+				return err
+			}
+
+			return oidcauth.ErrUnauthenticated
+		},
+	}
 }
